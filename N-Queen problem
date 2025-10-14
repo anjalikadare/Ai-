@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>N-Queens Visualization — Backtracking + Branch & Bound</title>
+<style>
+  :root {
+    --bg: #0a0f1d;
+    --card: #10182a;
+    --accent: #06b6d4;
+    --highlight: #10b981;
+    --muted: #9aa6b2;
+  }
+  body {
+    background: var(--bg);
+    color: #e5ecf2;
+    font-family: "Inter", system-ui, sans-serif;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    margin: 0;
+  }
+  .container {
+    background: var(--card);
+    border-radius: 14px;
+    padding: 24px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    width: 900px;
+    max-width: 100%;
+  }
+  h1 {
+    margin: 0;
+    color: var(--accent);
+    font-size: 22px;
+  }
+  p { color: var(--muted); font-size: 14px; }
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 18px;
+  }
+  button {
+    background: var(--accent);
+    border: none;
+    color: #041c26;
+    padding: 8px 16px;
+    border-radius: 8px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button.secondary {
+    background: transparent;
+    border: 1px solid var(--muted);
+    color: var(--muted);
+  }
+  select, input[type=number] {
+    background: #0b1220;
+    color: #e6eef6;
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 8px;
+    padding: 6px 10px;
+  }
+  #board {
+    display: grid;
+    justify-content: center;
+    gap: 2px;
+    margin-top: 20px;
+  }
+  .cell {
+    width: 50px;
+    height: 50px;
+    background: #0f1829;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 30px;
+    border-radius: 6px;
+    transition: background 0.3s;
+  }
+  .cell.dark { background: #14203b; }
+  .queen { color: var(--highlight); }
+  .tried { background: rgba(6,182,212,0.2); }
+  .fail { background: rgba(220,38,38,0.25); }
+  .info {
+    margin-top: 12px;
+    color: var(--muted);
+    font-size: 13px;
+  }
+  .log {
+    background: #081220;
+    padding: 10px;
+    border-radius: 8px;
+    margin-top: 10px;
+    height: 160px;
+    overflow-y: auto;
+    font-family: monospace;
+    font-size: 13px;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>N-Queens Visualizer (Backtracking + Branch & Bound)</h1>
+  <p>Place N queens on an N×N chessboard so that no two queens attack each other.
+     This visualization shows how the algorithm searches and backtracks step-by-step.</p>
+
+  <div class="controls">
+    <label>N = <input type="number" id="nVal" min="4" max="12" value="8"></label>
+    <button id="startBtn">Start</button>
+    <button id="pauseBtn" class="secondary">Pause</button>
+    <button id="nextBtn" class="secondary">Next Solution</button>
+    <button id="resetBtn" class="secondary">Reset</button>
+  </div>
+
+  <div id="board"></div>
+  <div class="info">
+    <span id="status">Ready to start.</span>
+  </div>
+  <div class="log" id="log"></div>
+</div>
+
+<script>
+let N = 8;
+let board = [];
+let running = false;
+let paused = false;
+let currentSolution = 0;
+let solutions = [];
+let rowLookup, upperDiag, lowerDiag;
+let delay = 300;
+
+const boardEl = document.getElementById('board');
+const statusEl = document.getElementById('status');
+const logEl = document.getElementById('log');
+const nVal = document.getElementById('nVal');
+
+function log(msg) {
+  logEl.textContent += msg + "\\n";
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function createBoard(n) {
+  boardEl.innerHTML = '';
+  boardEl.style.gridTemplateColumns = `repeat(${n}, 50px)`;
+  for (let i = 0; i < n * n; i++) {
+    const cell = document.createElement('div');
+    cell.className = 'cell' + ((Math.floor(i / n) + i % n) % 2 === 0 ? ' dark' : '');
+    boardEl.appendChild(cell);
+  }
+}
+
+function renderBoard() {
+  const cells = boardEl.children;
+  for (let i = 0; i < N; i++) {
+    for (let j = 0; j < N; j++) {
+      const idx = i * N + j;
+      cells[idx].innerHTML = board[i][j] ? '♛' : '';
+      cells[idx].classList.toggle('queen', board[i][j]);
+    }
+  }
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function solve(col = 0) {
+  if (paused) { await waitForResume(); }
+  if (col >= N) {
+    // found a valid solution
+    solutions.push(board.map(r => r.slice()));
+    log(`✅ Solution ${solutions.length} found`);
+    return true;
+  }
+
+  for (let i = 0; i < N; i++) {
+    if (isSafe(i, col)) {
+      board[i][col] = 1;
+      rowLookup[i] = upperDiag[i - col + N - 1] = lowerDiag[i + col] = true;
+      renderBoard();
+      await sleep(delay);
+
+      await solve(col + 1);
+
+      board[i][col] = 0;
+      rowLookup[i] = upperDiag[i - col + N - 1] = lowerDiag[i + col] = false;
+      renderBoard();
+      await sleep(delay);
+    }
+  }
+  return false;
+}
+
+function isSafe(row, col) {
+  return !rowLookup[row] && !upperDiag[row - col + N - 1] && !lowerDiag[row + col];
+}
+
+function resetAll() {
+  running = false;
+  paused = false;
+  currentSolution = 0;
+  solutions = [];
+  N = parseInt(nVal.value);
+  board = Array.from({ length: N }, () => Array(N).fill(0));
+  rowLookup = Array(N).fill(false);
+  upperDiag = Array(2 * N).fill(false);
+  lowerDiag = Array(2 * N).fill(false);
+  createBoard(N);
+  renderBoard();
+  statusEl.textContent = 'Board reset. Ready.';
+  logEl.textContent = '';
+}
+
+async function startSolve() {
+  if (running) return;
+  resetAll();
+  running = true;
+  statusEl.textContent = 'Solving...';
+  log('🔍 Solving started using Backtracking + Branch and Bound...');
+  await solve(0);
+  running = false;
+  if (solutions.length > 0) {
+    statusEl.textContent = `Found ${solutions.length} solutions for N=${N}. Click "Next Solution" to view.`;
+    showSolution(0);
+  } else {
+    statusEl.textContent = 'No solution found.';
+  }
+}
+
+function showSolution(index) {
+  if (index >= solutions.length) index = 0;
+  currentSolution = index;
+  board = solutions[index].map(r => r.slice());
+  renderBoard();
+  statusEl.textContent = `Showing solution ${index + 1} of ${solutions.length}`;
+}
+
+document.getElementById('startBtn').onclick = startSolve;
+document.getElementById('resetBtn').onclick = resetAll;
+document.getElementById('nextBtn').onclick = () => {
+  if (solutions.length > 0) {
+    currentSolution = (currentSolution + 1) % solutions.length;
+    showSolution(currentSolution);
+  }
+};
+document.getElementById('pauseBtn').onclick = () => {
+  paused = !paused;
+  statusEl.textContent = paused ? '⏸️ Paused' : '▶️ Resumed';
+};
+
+function waitForResume() {
+  return new Promise(resolve => {
+    const interval = setInterval(() => {
+      if (!paused) {
+        clearInterval(interval);
+        resolve();
+      }
+    }, 100);
+  });
+}
+
+// Initialize
+resetAll();
+</script>
+</body>
+</html>
